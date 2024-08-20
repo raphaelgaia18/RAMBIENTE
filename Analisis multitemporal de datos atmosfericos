@@ -1,0 +1,56 @@
+##### analisis multitemporal de datos atmosfericos ##
+#limpiar data o lista de datos
+rm(list= ls())
+
+#instalación de pakequetes para el analisis de daos atmosfericos
+
+library(dplyr) #manipulación de datos general
+library(openair) #manipulación dedatos de contaminación atmosferica
+library(lubridate) # manipulación de fechas
+
+#fijar el directorio de trabajo 
+
+setwd("C:/Users/ASISTMANTTO/Desktop/rstudio")
+
+#importar datos
+
+dataai<- read.csv("DATA_MQ_FINAL.csv",header = T, sep = ";",
+                 stringsAsFactors = F, encoding = "UTF-8")
+
+names(dataai) = c("Temperatura C°", "Humedad realtiva %",
+                  "PPM CO SENSOR1", "PPM CO SENSOR2") #CAMBIAMOS DE NOMBRE A LOS ENCABEZADOS DE LA TABLA
+# CAMBIO DE UNIDADES DE PPM A ug/m3
+
+k <- (0.082*(dataai$`Temperatura C°`+273.15))/0.82
+dataai$`PPM CO SENSOR1`<-(dataai$`PPM CO SENSOR1`*28.01*1000)/k
+dataai$`PPM CO SENSOR2`<-(dataai$`PPM CO SENSOR2`*28.01*1000)/k
+
+#PROCESAMIENTO DE DATOS
+ date <- seq(ymd_hm("2019-11-14 20:00"), by = "150 secs", length.out = nrow(dataai)) #crear una secuencia de datos cada 150 segundos hasta finalizar los numers de datos
+ 
+ dataai <- cbind(date,dataai) #cbind nos ayuda a unir columnas
+ 
+ #dataai$date <- dataai es lo mismo que el de arriba para creae una nuev acolumna con nombre date
+ 
+ str(dataai) #resumen de la base de datos
+ 
+ summary(dataai) # resumen estadistico
+ 
+ plot.new() 
+ 
+ timePlot(dataai, pollutant = c("PPM CO SENSOR1", "PPM CO SENSOR2"),
+          name.pol = c("PPM CO SENSOR1", "PPM CO SENSOR2"), smooth = T, 
+          xlab = " ", ylab = "ppm co", cols = c("red","blue"),
+          main = "CONCENTRACIÓN CO DE INTERIORES - 2019/11/14", avg.time = "10 min",
+          ref.y = list(h=35, lty=5))
+ pairs(dataai,
+       lower.panel = panel.smooth,upper.panel = NULL, col = "skyblue")
+ 
+ plot.new()
+scatterPlot(dataai, x = "Temperatura C°", y = 'PPM CO SENSOR1',
+             method = "density", cols ="red")
+timePlot(dataai, pollutant = "PPM CO SENSOR2",
+         name.pol = "PPM CO SENSOR1", smooth = T, 
+         xlab = " ", ylab = "ppm co", cols = "blue",
+         main = "CONCENTRACIÓN CO DE INTERIORES - 2019/11/14", avg.time = "10 min",
+         ref.y = list(h=35, lty=5))
