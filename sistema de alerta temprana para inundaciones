@@ -1,0 +1,82 @@
+library(lubridate)
+library(tidyverse)
+library(caret)
+library(dplyr)
+
+setwd("C:/Users/ASISTMANTTO/Desktop/rstudio/palcacocha")
+
+laguna <- read.csv("laguna_palcacocha.csv",header = TRUE, sep = ";", dec = ".")
+
+laguna$DATE <- as.Date(as.character(laguna$DATE), format = "%Y%m%d") #cambiando formato de fecha
+
+names(laguna) = c("date","tmax","tmin","hrmax","hrmin", "prec") #cambiamos nombres
+
+laguna$preca <- cumsum(laguna$prec) #suma acumulada de la precipitación 
+
+modelo <- lm(preca ~ tmax + tmin + hrmax + hrmin, data = laguna) #modelo de regresión lineal
+ 
+# Predecir la precipitación acumulada usando el modelo
+laguna$predicpac <- predict(modelo, newdata = laguna) #La función predict() en R se utiliza para predecir los valores en función de los datos de entrada
+
+#sistema de alerta temprana
+#eliminar los NA
+# Verificar valores NA en las columnas utilizadas
+any(is.na(laguna$preca))
+any(is.na(laguna$predicpac))
+
+# Eliminar filas con NA en las columnas de interés
+datos_limpios <- laguna %>%
+  filter(!is.na(preca) & !is.na(predicpac))
+
+#definimos un umbral con los datos de precipitación acumulada
+
+# Cálculo de percentiles
+percentil_95 <- quantile(datos_limpios$preca, 0.95, na.rm = TRUE)
+# Imprimir los resultados
+print(paste("Umbral del percentil 95:", percentil_95))
+
+# Imprimir el umbral
+print(paste("Umbral de precipitación acumulada (percentil 95):", percentil_95))
+
+#variable del umbral
+umbral_alert <- percentil_95
+
+# Generar alerta si la predicción supera el umbral
+datos_limpios <- datos_limpios %>%
+  mutate(alerta = ifelse(predicpac > umbral_alert, "Alerta", "Normal"))
+
+# Filtrar fechas con alerta
+fechas_alerta <- datos_limpios %>%
+  filter(alerta == "ALERTA")
+
+# Imprimir fechas con alerta
+print(fechas_alerta[, c("date", "predicpac", "alerta")])
+
+
+# Crear gráfico de precipitación acumulada con alertas
+ggplot(datos_limpios, aes(x = date, y =predicpac, color = alerta)) +
+  geom_line() +
+  geom_hline(yintercept = umbral_alert, linetype="dashed", color = "red") +
+  labs(title = "Predicción de Precipitación Acumulada y Alertas",
+       x = "Fecha",
+       y = "Precipitación Acumulada",
+       color = "Estado") +
+  theme_minimal()
+
+
+# Recalcular los residuos y RMSE, evaluar si el modelo es eficiente
+
+# Calcular el rango de la variable dependiente (precipitación acumulada)
+rango_valores <- range(datos_limpios$preca, na.rm = TRUE)
+print(paste("Rango de valores de la precipitación acumulada: ", rango_valores[1], " a ", rango_valores[2]))
+
+#para saber como se comporta el modelo
+residuos <- datos_limpios$preca - datos_limpios$predicpac
+mse <- mean(residuos^2, na.rm = TRUE)
+rmse <- sqrt(mse)
+
+print(paste("RMSE:", rmse))
+# Calcular el rango (diferencia entre el máximo y el mínimo)
+rango_diferencia <- diff(rango_valores)
+print(paste("Rango de diferencia: ", rango_diferencia))
+print((rmse*100)/rango_diferencia)
