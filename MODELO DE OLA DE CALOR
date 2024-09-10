@@ -1,0 +1,75 @@
+library(randomForest)
+library(caret)
+library(dbplyr)
+library(caTools)
+library(ggplot2)
+
+setwd("C:/Users/ASISTMANTTO/Desktop/proyecto")
+
+datos <- read.csv("data.csv", sep = ";", header = TRUE, dec = ".")
+#
+datos$Date<- as.Date(datos$Date)
+datos$t_exterior<- as.numeric(datos$t_exterior)
+datos$hum_exte<-as.numeric(datos$hum_exte)
+datos$ind_calor<-as.numeric(datos$ind_calor)
+datos$rad_solar<-as.numeric(datos$rad_solar)
+datos$indi_uv<-as.numeric(datos$indi_uv)
+
+#limpieza de datos
+limpio <- datos[!rowSums(is.na(datos))>0,]
+
+
+# DEFINIMOS UN HUMBRAL 
+humbral <- 27
+
+#Creamos una variable de ola de calor en función a la temperatura exterior
+
+limpio$Olacalor <- ifelse(limpio$t_exterior>humbral,1,0)
+
+# numero de días necesarios para considerar olas de calor
+
+diascon <- 3
+
+#cramos una nueva varible de cuente los dias consecutivos con temperaturas por encima del umbral
+limpio$condiascon <- with(limpio, ave(t_exterior, cumsum(t_exterior<=humbral),
+                                      FUN = function(x) sequence(rle(x>humbral)$lengths)))
+
+#creamos una nueva variable de ola de calor 
+
+limpio$Olacalor <- ifelse(limpio$condiascon >= diascon, 1,0)
+
+
+#lo comvertimos a factor para que r entienda que va a trabajar con categorias de 1 y 0
+
+limpio$Olacalor <- as.factor(limpio$Olacalor)
+
+#################################################################
+#################  MODELO DE randomForest  ######################
+#################################################################
+
+# División del conjunto de datos en entrenamiento (70%) y prueba (30%)
+set.seed(123)  # Para resultados reproducibles semilla del arbol
+
+split <- sample.split(limpio$Olacalor, SplitRatio = 0.7)
+train_data <- subset(limpio, split == TRUE)
+test_data <- subset(limpio, split == FALSE)
+# Entrenar el modelo Random Forest
+# 1 si hubo ola de calor y 0 que no hubo ola de calor
+set.seed(123)
+rf_model <- randomForest(Olacalor ~ t_exterior + hum_exte + ind_calor + rad_solar + indi_uv,
+                         data = train_data,   # El dataframe de entrenamiento
+                         ntree = 10000,         # Número de árboles en el bosque
+                         mtry = 3,            # Número de variables a probar en cada división
+                         importance = TRUE)    # Importancia de las variables
+print(rf_model)
+
+ggplot(limpio, aes(x = Date, y = t_exterior)) +
+  geom_line(color = "blue", size = 1) +  # Línea de temperatura
+  geom_point(aes(color = Olacalor), size = 2) +  # Puntos que resaltan los días de ola de calor
+  scale_color_manual(values = c("0" = "gray", "1" = "red"), labels = c("No ola de calor", "ola de calor")) +
+  geom_hline(yintercept = humbral, linetype = "dashed", color = "black") +  # Línea punteada del umbral
+  labs(title = "Temperatura diaria y olas de calor",
+       x = "Día",
+       y = "Temperatura (°C)",
+       color = "Ola de calor") +
+  theme_minimal()
