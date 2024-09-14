@@ -1,34 +1,38 @@
 library(randomForest)
-library(caret)
+library(caret) #entrenamiento de mechani learnig
 library(dbplyr)
 library(caTools)
 library(ggplot2)
-
+library(plotly)
 setwd("C:/Users/ASISTMANTTO/Desktop/proyecto")
 
 datos <- read.csv("data.csv", sep = ";", header = TRUE, dec = ".")
-#
-datos$Date<- as.Date(datos$Date)
+#convertimos los datos a sus respectivos formatos
+datos$Date<- as.Date(datos$Date, format = "%d/%m/%Y")
 datos$t_exterior<- as.numeric(datos$t_exterior)
 datos$hum_exte<-as.numeric(datos$hum_exte)
 datos$ind_calor<-as.numeric(datos$ind_calor)
 datos$rad_solar<-as.numeric(datos$rad_solar)
 datos$indi_uv<-as.numeric(datos$indi_uv)
-
+#verificamos que columas tiene NA
+colSums(is.na(datos))
+#ver que columas tiene valores NA
+datos[!complete.cases(datos), ]
 #limpieza de datos
 limpio <- datos[!rowSums(is.na(datos))>0,]
 
 
 # DEFINIMOS UN HUMBRAL 
-humbral <- 27
+humbral <- 28
 
 #Creamos una variable de ola de calor en función a la temperatura exterior
+# 1 si hubo ola de calor y 0 que no hubo ola de calor
 
 limpio$Olacalor <- ifelse(limpio$t_exterior>humbral,1,0)
 
 # numero de días necesarios para considerar olas de calor
 
-diascon <- 3
+diascon <- 3 #Nota Técnica 002 SENAMHI-DGM-2015
 
 #cramos una nueva varible de cuente los dias consecutivos con temperaturas por encima del umbral
 limpio$condiascon <- with(limpio, ave(t_exterior, cumsum(t_exterior<=humbral),
@@ -48,14 +52,14 @@ limpio$Olacalor <- as.factor(limpio$Olacalor)
 #################################################################
 
 # División del conjunto de datos en entrenamiento (70%) y prueba (30%)
-set.seed(123)  # Para resultados reproducibles semilla del arbol
+set.seed(42)  # Para resultados reproducibles semilla del arbol
 
-split <- sample.split(limpio$Olacalor, SplitRatio = 0.7)
-train_data <- subset(limpio, split == TRUE)
-test_data <- subset(limpio, split == FALSE)
+split <- sample.split(limpio$Olacalor, SplitRatio = 0.7) #separa 70% en true y el 30% en false
+train_data <- subset(limpio, split == TRUE) #utilizara el 70% de los datos
+test_data <- subset(limpio, split == FALSE)# utilizara el 30% de los datos
 # Entrenar el modelo Random Forest
-# 1 si hubo ola de calor y 0 que no hubo ola de calor
-set.seed(123)
+
+set.seed(42)
 rf_model <- randomForest(Olacalor ~ t_exterior + hum_exte + ind_calor + rad_solar + indi_uv,
                          data = train_data,   # El dataframe de entrenamiento
                          ntree = 10000,         # Número de árboles en el bosque
@@ -63,13 +67,21 @@ rf_model <- randomForest(Olacalor ~ t_exterior + hum_exte + ind_calor + rad_sola
                          importance = TRUE)    # Importancia de las variables
 print(rf_model)
 
-ggplot(limpio, aes(x = Date, y = t_exterior)) +
+# Crear el gráfico base con ggplot2
+grafico <- ggplot(limpio, aes(x = Date, y = t_exterior)) +
   geom_line(color = "blue", size = 1) +  # Línea de temperatura
   geom_point(aes(color = Olacalor), size = 2) +  # Puntos que resaltan los días de ola de calor
-  scale_color_manual(values = c("0" = "gray", "1" = "red"), labels = c("No ola de calor", "ola de calor")) +
+  scale_color_manual(values = c("0" = "gray", "1" = "red"), labels = c("No ola de calor", "Ola de calor")) +
   geom_hline(yintercept = humbral, linetype = "dashed", color = "black") +  # Línea punteada del umbral
   labs(title = "Temperatura diaria y olas de calor",
        x = "Día",
        y = "Temperatura (°C)",
        color = "Ola de calor") +
   theme_minimal()
+print(grafico)
+# Convertir el gráfico de ggplot a plotly para hacer interactivo
+grafico_interactivo <- ggplotly(grafico)
+
+# Mostrar el gráfico interactivo
+grafico_interactivo
+
