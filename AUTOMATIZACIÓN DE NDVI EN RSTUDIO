@@ -1,0 +1,98 @@
+# Librerías
+library(terra)
+library(dplyr)
+library(stringr)
+
+# --- rutas principales ---
+root_di <- "COLOCA LA DIRECCIÓN DONDE ESTA LA CARPETA GENERAL"
+out_root <- file.path(root_dir, "NDVI")
+dir.create(out_root, showWarnings = FALSE, recursive = TRUE)
+
+# Shapefile
+shp_path <- "UBICACIÓN DE LOS SHERIFILE"
+chorrillos <- vect(shp_path)
+
+# Subcarpetas (años), excluyendo carpeta NDVI
+subdirs <- list.dirs(root_dir, full.names = TRUE, recursive = FALSE)
+subdirs <- subdirs[basename(subdirs) != basename(out_root)]
+
+# Detectar carpetas de años
+year_dirs <- subdirs[grepl("^\\d{4}$", basename(subdirs))]
+
+# --- función auxiliar: leer + mosaicar si hay varios tiles ---
+read_or_mosaic <- function(paths) {
+  if (length(paths) == 1) return(rast(paths))
+  rs <- lapply(paths, rast)
+  target_crs <- crs(rs[[1]])
+  rs <- lapply(rs, function(r) {
+    if (crs(r) != target_crs) r <- project(r, target_crs)
+    r
+  })
+  do.call(mosaic, rs)
+}
+
+# --- bucle principal ---
+for (year_dir in year_dirs) {
+  year_name <- basename(year_dir)
+  out_dir <- file.path(out_root, year_name)
+  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  files <- list.files(year_dir, pattern="\\.tif$", full.names=TRUE, ignore.case=TRUE)
+  df <- tibble(path = files) %>%
+    mutate(filename = basename(path),
+           fecha = str_extract(filename, "\\d{2}-\\d{2}"),
+           banda = toupper(str_extract(filename, "B\\d+")))
+  
+  fechas <- sort(unique(na.omit(df$fecha)))
+  
+  for (f in fechas) {
+    sub <- df %>% filter(fecha == f)
+    red_files <- sub$path[sub$banda == "B4"]
+    nir_files <- sub$path[sub$banda == "B5"]
+    
+    if (length(red_files) == 0 || length(nir_files) == 0) {
+      message("⚠️ Faltan bandas para ", f, " en ", year_name)
+      next
+    }
+    
+    red <- read_or_mosaic(red_files)
+    nir <- read_or_mosaic(nir_files)
+    
+    if (!compareGeom(red, nir, stopOnError = FALSE)) {
+      if (crs(red) != crs(nir)) nir <- project(nir, crs(red))
+      if (!compareGeom(red, nir, stopOnError = FALSE)) {
+        nir <- resample(nir, red, method = "bilinear")
+      }
+    }
+    
+    # calcular NDVI
+    ndvi <- ifel((nir + red) == 0, NA, (nir - red) / (nir + red))
+    
+    # --- diagnóstico de CRS y extensión ---
+    message("📌 Diagnóstico para NDVI ", f, " ", year_name)
+    message("CRS imagen: ", crs(red))
+    message("CRS shapefile: ", crs(chorrillos))
+    message("Extensión imagen: ", paste(ext(red)))
+    message("Extensión shapefile: ", paste(ext(chorrillos)))
+    
+    # asegurar CRS coincidentes
+    if (crs(red) != crs(chorrillos)) {
+      message("🔄 Reproyectando shapefile a CRS de la imagen...")
+      chorrillos <- project(chorrillos, crs(red))
+    }
+    
+    # recortar al shapefile
+    ndvi_crop <- crop(ndvi, chorrillos)
+    ndvi_mask <- mask(ndvi_crop, chorrillos)
+    
+    # guardar
+    out_name <- sprintf("NDVI_%s_%s_chorrillos.tif", f, year_name)
+    out_path <- file.path(out_dir, out_name)
+    
+    writeRaster(ndvi_mask, out_path, overwrite = TRUE,
+                datatype="FLT4S",
+                wopt=list(gdal=c("COMPRESS=LZW")))
+    
+    message("✅ NDVI recortado guardado: ", out_path)
+  }
+}
